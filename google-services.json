@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "734981107115",
+    "project_id": "res4foodorder",
+    "storage_bucket": "res4foodorder.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:734981107115:android:117728939e3874bd2736ee",
+        "android_client_info": {
+          "package_name": "com.res4.orders"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDG3v0aPe2317YJTSG1sAgfXYlQeSPwur8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

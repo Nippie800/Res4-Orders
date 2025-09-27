@@ -1,0 +1,299 @@
+// app/cart.tsx
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  collection,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  runTransaction,
+  serverTimestamp,
+} from 'firebase/firestore';
+import { db } from 'firebaseConfig';
+import { useEffect, useState } from 'react';
+import {
+  Alert,
+  FlatList,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { useCart } from '../context/CartContext';
+
+type Slot = {
+  id: string;
+  time: string;
+  label: string;
+  capacity: number;
+  booked: number;
+  active: boolean;
+};
+
+export default function CartScreen() {
+  const { cart, getTotal, clearCart, removeFromCart, updateQty } = useCart();
+
+  const [slots, setSlots] = useState<Slot[]>([]);
+  const [loadingSlots, setLoadingSlots] = useState(true);
+  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
+  const [studentId, setStudentId] = useState<string | null>(null);
+
+  // 🔹 Load studentId from AsyncStorage (saved in LoginScreen)
+  useEffect(() => {
+    const fetchStudentId = async () => {
+      const id = await AsyncStorage.getItem('studentId');
+      if (id) {
+        setStudentId(id);
+      }
+    };
+    fetchStudentId();
+  }, []);
+
+  // 🔹 Fetch recurring pickup slots
+  useEffect(() => {
+    const qSlots = query(collection(db, 'pickupSlots'), orderBy('time'));
+
+    const unsub = onSnapshot(qSlots, (snap) => {
+      const arr: Slot[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as any;
+        arr.push({
+          id: d.id,
+          time: data.time,
+          label: data.label,
+          capacity: data.capacity,
+          booked: data.booked ?? 0,
+          active: data.active !== false,
+        });
+      });
+      setSlots(arr);
+      setLoadingSlots(false);
+
+      // auto-select the first available slot if none selected
+      if (!selectedSlotId) {
+        const firstAvailable = arr.find(
+          (s) => s.active && (s.booked ?? 0) < (s.capacity ?? 0)
+        );
+        if (firstAvailable) setSelectedSlotId(firstAvailable.id);
+      }
+    });
+
+    return () => unsub();
+  }, [selectedSlotId]);
+
+  // 🔹 Place Order with studentId
+  const placeOrder = async () => {
+    if (cart.length === 0) {
+      Alert.alert('Cart is empty', 'Please add items before placing an order.');
+      return;
+    }
+    if (!selectedSlotId) {
+      Alert.alert('Select pickup time', 'Please choose a pickup slot.');
+      return;
+    }
+    if (!studentId) {
+      Alert.alert(
+        'Missing Student ID',
+        'Please restart the app and enter your student number.'
+      );
+      return;
+    }
+
+    const slot = slots.find((s) => s.id === selectedSlotId);
+    if (!slot) {
+      Alert.alert('Slot error', 'Selected slot no longer exists.');
+      return;
+    }
+
+    const slotRef = doc(db, 'pickupSlots', slot.id);
+    const orderRef = doc(collection(db, 'orders')); // new order doc
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(slotRef);
+        if (!snap.exists()) throw new Error('Slot missing');
+        const s = snap.data() as Slot;
+
+        const isActive = s.active !== false;
+        const cap = s.capacity ?? 0;
+        const booked = s.booked ?? 0;
+        if (!isActive || booked >= cap) {
+          throw new Error('This slot is full or disabled.');
+        }
+
+        // ✅ increment booked count
+        tx.update(slotRef, { booked: booked + 1 });
+
+        // ✅ create order with studentId
+        tx.set(orderRef, {
+          items: cart,
+          total: getTotal(),
+          pickupTime: s.label,
+          pickupSlotId: slot.id,
+          studentId: studentId, // 🔑 attached here
+          status: 'placed',
+          createdAt: serverTimestamp(),
+        });
+      });
+
+      clearCart();
+      Alert.alert('Success', 'Order placed successfully!');
+    } catch (err: any) {
+      console.error(err);
+      Alert.alert('Error', err?.message ?? 'Failed to place order.');
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Your Cart</Text>
+
+      {cart.length === 0 ? (
+        <Text style={styles.empty}>Your cart is empty.</Text>
+      ) : (
+        <FlatList
+          data={cart}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <View style={styles.item}>
+              <View>
+                <Text style={styles.itemText}>
+                  {item.name} - R{item.price * item.qty}
+                </Text>
+                <View style={styles.qtyContainer}>
+                  <TouchableOpacity
+                    style={styles.qtyButton}
+                    onPress={() => updateQty(item.id, item.qty - 1)}
+                  >
+                    <Text style={styles.qtyText}>-</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.qtyNumber}>{item.qty}</Text>
+                  <TouchableOpacity
+                    style={styles.qtyButton}
+                    onPress={() => updateQty(item.id, item.qty + 1)}
+                  >
+                    <Text style={styles.qtyText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.removeButton}
+                onPress={() => removeFromCart(item.id)}
+              >
+                <Text style={styles.removeText}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        />
+      )}
+
+      <Text style={styles.total}>Total: R{getTotal()}</Text>
+
+      {/* Pickup Slots */}
+      <View style={styles.pickup}>
+        <Text style={styles.pickupLabel}>
+          Pickup Time {loadingSlots ? '(loading...)' : ''}
+        </Text>
+        {(!loadingSlots && slots.length === 0) && (
+          <Text style={{ color: '#a00', marginBottom: 8 }}>
+            No pickup slots available.
+          </Text>
+        )}
+        <View style={styles.pickupButtons}>
+          {slots.map((slot) => {
+            const isFull = (slot.booked ?? 0) >= (slot.capacity ?? 0);
+            const disabled = !slot.active || isFull;
+            const selected = selectedSlotId === slot.id;
+
+            return (
+              <TouchableOpacity
+                key={slot.id}
+                activeOpacity={disabled ? 1 : 0.7}
+                style={[
+                  styles.pickupOption,
+                  selected && styles.pickupSelected,
+                  disabled && styles.pickupDisabled,
+                ]}
+                onPress={() => {
+                  if (!disabled) setSelectedSlotId(slot.id);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.pickupText,
+                    disabled && styles.pickupTextDisabled,
+                    selected && !disabled && styles.pickupTextSelected,
+                  ]}
+                >
+                  {slot.label}
+                  {isFull ? ' (Full)' : ''}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
+      <TouchableOpacity style={styles.orderButton} onPress={placeOrder}>
+        <Text style={styles.orderText}>Place Order</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 20, backgroundColor: '#fffbea' },
+  title: { fontSize: 28, fontWeight: 'bold', marginBottom: 10 },
+  empty: { fontSize: 16, color: '#888', marginVertical: 20, textAlign: 'center' },
+  item: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+    backgroundColor: '#fff',
+    marginBottom: 10,
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  itemText: { fontSize: 16, marginBottom: 8 },
+  qtyContainer: { flexDirection: 'row', alignItems: 'center' },
+  qtyButton: {
+    backgroundColor: '#ff8c00',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 5,
+  },
+  qtyText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  qtyNumber: { marginHorizontal: 10, fontSize: 16 },
+  removeButton: { backgroundColor: '#ff4d4d', padding: 6, borderRadius: 5 },
+  removeText: { color: '#fff', fontWeight: 'bold' },
+  total: { fontSize: 20, fontWeight: 'bold', marginTop: 20 },
+  pickup: { marginTop: 20 },
+  pickupLabel: { fontSize: 16, marginBottom: 10 },
+  pickupButtons: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
+  pickupOption: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#ff8c00',
+    borderRadius: 8,
+    marginBottom: 5,
+    backgroundColor: '#fff',
+  },
+  pickupSelected: { backgroundColor: '#ff8c00', borderColor: '#ff8c00' },
+  pickupDisabled: { backgroundColor: '#eee', borderColor: '#ccc' },
+  pickupText: { color: '#333', fontWeight: 'bold' },
+  pickupTextDisabled: { color: '#888', fontWeight: 'normal' },
+  pickupTextSelected: { color: '#fff' },
+  orderButton: {
+    backgroundColor: '#28a745',
+    padding: 15,
+    borderRadius: 10,
+    marginTop: 30,
+    alignItems: 'center',
+  },
+  orderText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+});
