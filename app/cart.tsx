@@ -1,4 +1,5 @@
 // app/cart.tsx
+/*
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   collection,
@@ -189,7 +190,7 @@ export default function CartScreen() {
 
       <Text style={styles.total}>Total: R{getTotal()}</Text>
 
-      {/* Pickup Slots */}
+      /* Pickup Slots *
       <View style={styles.pickup}>
         <Text style={styles.pickupLabel}>
           Pickup Time {loadingSlots ? '(loading...)' : ''}
@@ -296,4 +297,194 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   orderText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+});
+*/
+
+//SHOOTERS CART
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { collection, doc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { db } from 'firebaseConfig';
+import { useEffect, useState } from 'react';
+import {
+  Alert,
+  FlatList,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { useCart } from '../context/CartContext';
+
+export default function CartScreen() {
+  const { cart, getTotal, clearCart, removeFromCart, updateQty } = useCart();
+  const [tableNumber, setTableNumber] = useState<string | null>(null);
+
+  // Load table number (previously "studentId")
+  useEffect(() => {
+    const fetchTable = async () => {
+      const id = await AsyncStorage.getItem('studentId'); // 👈 keeping existing field for now
+      if (id) setTableNumber(id);
+    };
+    fetchTable();
+  }, []);
+
+  const placeOrder = async () => {
+    if (cart.length === 0) {
+      Alert.alert('Cart is empty', 'Please add items before placing an order.');
+      return;
+    }
+
+    if (!tableNumber) {
+      Alert.alert(
+        'Missing Table Number',
+        'Please restart the app and enter your table number.'
+      );
+      return;
+    }
+
+    const orderRef = doc(collection(db, 'orders'));
+
+    try {
+      await runTransaction(db, async (tx) => {
+        tx.set(orderRef, {
+          items: cart,
+          total: getTotal(),
+          tableNumber: tableNumber, // 👈 changed label
+          status: 'placed',
+          createdAt: serverTimestamp(),
+        });
+      });
+
+      clearCart();
+      Alert.alert('Success', 'Your order has been sent to the kitchen!');
+    } catch (err: any) {
+      console.error(err);
+      Alert.alert('Error', err?.message ?? 'Failed to place order.');
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Order Summary</Text>
+
+      {cart.length === 0 ? (
+        <Text style={styles.empty}>Your cart is empty.</Text>
+      ) : (
+        <FlatList
+          data={cart}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <View style={styles.item}>
+              <View>
+                <Text style={styles.itemText}>{item.name}</Text>
+                <Text style={styles.itemSub}>
+                  R{item.price} x {item.qty} = R{item.price * item.qty}
+                </Text>
+              </View>
+              <View style={styles.qtyContainer}>
+                <TouchableOpacity
+                  style={styles.qtyButton}
+                  onPress={() => updateQty(item.id, item.qty - 1)}
+                >
+                  <Text style={styles.qtyText}>-</Text>
+                </TouchableOpacity>
+                <Text style={styles.qtyNumber}>{item.qty}</Text>
+                <TouchableOpacity
+                  style={styles.qtyButton}
+                  onPress={() => updateQty(item.id, item.qty + 1)}
+                >
+                  <Text style={styles.qtyText}>+</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        />
+      )}
+
+      {cart.length > 0 && (
+        <>
+          <View style={styles.divider} />
+          <Text style={styles.total}>Total: R{getTotal()}</Text>
+          <TouchableOpacity style={styles.orderButton} onPress={placeOrder}>
+            <Text style={styles.orderText}>Confirm Order</Text>
+          </TouchableOpacity>
+        </>
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    padding: 20,
+    backgroundColor: '#fffaf3',
+  },
+  title: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 20,
+    color: '#222',
+  },
+  empty: {
+    fontSize: 16,
+    color: '#888',
+    marginVertical: 30,
+    textAlign: 'center',
+  },
+  item: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 15,
+    borderBottomWidth: 1,
+    borderColor: '#e5e5e5',
+  },
+  itemText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  itemSub: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  qtyContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  qtyButton: {
+    backgroundColor: '#333',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 5,
+  },
+  qtyText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+    qtyNumber: { marginHorizontal: 10, fontSize: 16 },
+  divider: {
+    height: 1,
+    backgroundColor: '#ddd',
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  total: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    textAlign: 'right',
+    marginVertical: 10,
+    color: '#111',
+  },
+  orderButton: {
+    backgroundColor: '#4CAF50',
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  orderText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
 });
