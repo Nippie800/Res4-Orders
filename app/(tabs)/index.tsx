@@ -115,7 +115,8 @@ export default function HomeScreen() {
       return;
     }
 
-    await AsyncStorage.setItem("studentId", tableNumber.trim());
+   await AsyncStorage.setItem('tableNumber', String(tableNumber));
+
     router.push("../menu");
   };
 

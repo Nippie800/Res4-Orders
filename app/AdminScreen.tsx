@@ -1,4 +1,5 @@
 // src/screens/AdminScreen.tsx
+/*
 import { collection, doc, onSnapshot, orderBy, query, updateDoc } from "firebase/firestore";
 import { db } from "firebaseConfig";
 import { useEffect, useState } from "react";
@@ -54,7 +55,7 @@ const AdminScreen = () => {
     <View style={styles.container}>
       <Text style={styles.title}>Kitchen Admin Panel</Text>
 
-      {/* Filter Bar */}
+      {/* Filter Bar *
       <View style={styles.filterBar}>
         {FILTER_OPTIONS.map((option) => (
           <TouchableOpacity
@@ -77,7 +78,7 @@ const AdminScreen = () => {
         ))}
       </View>
 
-      {/* Orders List */}
+      {/* Orders List *
       <FlatList
         data={filteredOrders}
         keyExtractor={(item) => item.id}
@@ -89,10 +90,10 @@ const AdminScreen = () => {
             <Text>Pickup: {item.pickupTime}</Text>
             <Text>Total: R{item.total}</Text>
 
-            {/* Status Badge */}
+            {/* Status Badge *
             {renderStatusBadge(item.status)}
 
-            {/* Advance Button */}
+            {/* Advance Button *
             <TouchableOpacity
               style={[
                 styles.button,
@@ -161,4 +162,127 @@ const styles = StyleSheet.create({
   },
   badgeText: { color: "#fff", fontWeight: "bold", fontSize: 12 },
 });
+*/
+//SHOOTERS ADMIN PAGE
+// app/admin.tsx
+import { collection, doc, onSnapshot, orderBy, query, updateDoc } from 'firebase/firestore';
+import { db } from 'firebaseConfig';
+import { useEffect, useState } from 'react';
+import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
+type Order = {
+  id: string;
+  tableNumber: string;
+  items: { name: string; qty: number; price: number }[];
+  total: number;
+  status: string;
+  createdAt?: { seconds: number; nanoseconds: number };
+};
+
+export default function AdminScreen() {
+  const [orders, setOrders] = useState<Order[]>([]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
+    const unsub = onSnapshot(q, (snap) => {
+      const list: Order[] = [];
+      snap.forEach((docSnap) => {
+        const data = docSnap.data() as Order;
+        list.push({ ...data, id: docSnap.id });
+      });
+      setOrders(list);
+    });
+
+    return () => unsub();
+  }, []);
+
+  // ✅ Properly update order status
+  const updateStatus = async (id: string, newStatus: string) => {
+    try {
+      const orderRef = doc(db, "orders", id);
+      await updateDoc(orderRef, { status: newStatus });
+      console.log(`✅ Order ${id} updated to ${newStatus}`);
+    } catch (error) {
+      console.error("Error updating status:", error);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Shooters Admin Dashboard</Text>
+      <FlatList
+        data={orders}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <View style={styles.orderCard}>
+            <Text style={styles.orderTitle}>🪑 Table {item.tableNumber}</Text>
+            <Text style={styles.status}>Status: {item.status}</Text>
+            <Text style={styles.subText}>
+              {item.createdAt
+                ? new Date(item.createdAt.seconds * 1000).toLocaleTimeString()
+                : 'N/A'}
+            </Text>
+
+            <View style={styles.itemsList}>
+              {item.items.map((i, idx) => (
+                <Text key={idx} style={styles.itemText}>
+                  {i.qty} × {i.name} — R{i.price * i.qty}
+                </Text>
+              ))}
+            </View>
+
+            <Text style={styles.total}>Total: R{item.total}</Text>
+
+            <View style={styles.buttonsRow}>
+              <TouchableOpacity
+                style={[styles.button, styles.inProgress]}
+                onPress={() => updateStatus(item.id, 'in_progress')}
+              >
+                <Text style={styles.btnText}>In Progress</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.button, styles.ready]}
+                onPress={() => updateStatus(item.id, 'ready')}
+              >
+                <Text style={styles.btnText}>Ready</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.button, styles.served]}
+                onPress={() => updateStatus(item.id, 'served')}
+              >
+                <Text style={styles.btnText}>Served</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 20, backgroundColor: '#121212' },
+  title: { fontSize: 26, fontWeight: 'bold', color: '#fff', marginBottom: 20, textAlign: 'center' },
+  orderCard: {
+    backgroundColor: '#1e1e1e',
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: '#ff3366',
+  },
+  orderTitle: { fontSize: 20, fontWeight: 'bold', color: '#ff3366' },
+  status: { color: '#fff', marginTop: 5 },
+  subText: { color: '#aaa', fontSize: 12, marginBottom: 8 },
+  itemsList: { marginVertical: 10 },
+  itemText: { color: '#ddd', fontSize: 15 },
+  total: { color: '#fff', fontWeight: 'bold', fontSize: 16, marginBottom: 10 },
+  buttonsRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  button: { flex: 1, padding: 8, marginHorizontal: 3, borderRadius: 6, alignItems: 'center' },
+  inProgress: { backgroundColor: '#ffa500' },
+  ready: { backgroundColor: '#28a745' },
+  served: { backgroundColor: '#007bff' },
+  btnText: { color: '#fff', fontWeight: 'bold' },
+});

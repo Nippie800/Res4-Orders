@@ -301,62 +301,110 @@ const styles = StyleSheet.create({
 */
 
 //SHOOTERS CART
+// app/cart.tsx
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { collection, doc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { useRouter } from 'expo-router';
+import { collection, doc, onSnapshot, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { db } from 'firebaseConfig';
 import { useEffect, useState } from 'react';
-import {
-  Alert,
-  FlatList,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useCart } from '../context/CartContext';
 
 export default function CartScreen() {
-  const { cart, getTotal, clearCart, removeFromCart, updateQty } = useCart();
-  const [tableNumber, setTableNumber] = useState<string | null>(null);
+  const { cart, getTotal, clearCart, updateQty } = useCart();
+  const [tableNumber, setTableNumber] = useState<string>('');
+  const [hasActiveOrder, setHasActiveOrder] = useState(false);
+  const router = useRouter();
 
-  // Load table number (previously "studentId")
+  // ✅ Check if an active order still exists in Firestore
   useEffect(() => {
-    const fetchTable = async () => {
-      const id = await AsyncStorage.getItem('studentId'); // 👈 keeping existing field for now
-      if (id) setTableNumber(id);
+    const verifyActiveOrder = async () => {
+      const savedTable = await AsyncStorage.getItem('tableNumber');
+      if (savedTable) setTableNumber(savedTable);
+
+      const savedOrderId = await AsyncStorage.getItem('activeOrderId');
+      if (!savedOrderId) {
+        setHasActiveOrder(false);
+        return;
+      }
+
+      const orderRef = doc(db, 'orders', savedOrderId);
+      const unsub = onSnapshot(orderRef, (snap) => {
+        if (!snap.exists()) {
+          setHasActiveOrder(false);
+          AsyncStorage.removeItem('activeOrderId');
+          return;
+        }
+
+        const current = snap.data();
+        const status = current.status?.toLowerCase();
+
+        // ✅ Hide button if order is done or collected
+        if (status === 'served' || status === 'collection') {
+          AsyncStorage.removeItem('activeOrderId');
+          setHasActiveOrder(false);
+        } else {
+          setHasActiveOrder(true);
+        }
+      });
+
+      return () => unsub();
     };
-    fetchTable();
+
+    verifyActiveOrder();
   }, []);
 
+  // 🧾 Place Order
   const placeOrder = async () => {
     if (cart.length === 0) {
       Alert.alert('Cart is empty', 'Please add items before placing an order.');
       return;
     }
 
-    if (!tableNumber) {
-      Alert.alert(
-        'Missing Table Number',
-        'Please restart the app and enter your table number.'
-      );
+    if (!tableNumber.trim()) {
+      Alert.alert('Missing Table Number', 'Please enter your table number.');
       return;
     }
 
-    const orderRef = doc(collection(db, 'orders'));
-
     try {
+      await AsyncStorage.removeItem('activeOrderId');
+      const lastOrderTime = await AsyncStorage.getItem('lastOrderTime');
+      const now = Date.now();
+      const cooldown = 5 * 60 * 1000; // 5 minutes
+
+      if (lastOrderTime) {
+        const diff = now - parseInt(lastOrderTime);
+        if (diff < cooldown) {
+          const remaining = Math.ceil((cooldown - diff) / 60000);
+          Alert.alert(
+            'Please Wait',
+            `You can only place one order every 5 minutes.\nTry again in ${remaining} min(s).`
+          );
+          return;
+        }
+      }
+
+      // Clear any old order reference
+    
+      await AsyncStorage.setItem('tableNumber', tableNumber);
+
+      // Create new order
+      const orderRef = doc(collection(db, 'orders'));
       await runTransaction(db, async (tx) => {
         tx.set(orderRef, {
+          tableNumber,
           items: cart,
           total: getTotal(),
-          tableNumber: tableNumber, // 👈 changed label
           status: 'placed',
           createdAt: serverTimestamp(),
         });
       });
 
+      await AsyncStorage.setItem('lastOrderTime', now.toString());
+      await AsyncStorage.setItem('activeOrderId', orderRef.id);
       clearCart();
-      Alert.alert('Success', 'Your order has been sent to the kitchen!');
+
+      router.push('/OrderStatusScreen');
     } catch (err: any) {
       console.error(err);
       Alert.alert('Error', err?.message ?? 'Failed to place order.');
@@ -410,81 +458,46 @@ export default function CartScreen() {
           </TouchableOpacity>
         </>
       )}
+
+      {/* 🍔 Floating gold button only if there's an active order */}
+      {hasActiveOrder && (
+        <TouchableOpacity
+          style={styles.floatingButton}
+          onPress={() => router.push('/OrderStatusScreen')}
+        >
+          <Text style={styles.floatingText}>🍔</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 20,
-    backgroundColor: '#fffaf3',
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 20,
-    color: '#222',
-  },
-  empty: {
-    fontSize: 16,
-    color: '#888',
-    marginVertical: 30,
-    textAlign: 'center',
-  },
-  item: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 15,
-    borderBottomWidth: 1,
-    borderColor: '#e5e5e5',
-  },
-  itemText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  itemSub: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 4,
-  },
-  qtyContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  qtyButton: {
-    backgroundColor: '#333',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 5,
-  },
+  container: { flex: 1, padding: 20, backgroundColor: '#fffaf3' },
+  title: { fontSize: 26, fontWeight: 'bold', textAlign: 'center', marginBottom: 20, color: '#222' },
+  empty: { fontSize: 16, color: '#888', marginVertical: 30, textAlign: 'center' },
+  item: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, borderBottomWidth: 1, borderColor: '#e5e5e5' },
+  itemText: { fontSize: 16, fontWeight: '600', color: '#333' },
+  itemSub: { fontSize: 14, color: '#666', marginTop: 4 },
+  qtyContainer: { flexDirection: 'row', alignItems: 'center' },
+  qtyButton: { backgroundColor: '#333', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 5 },
   qtyText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-    qtyNumber: { marginHorizontal: 10, fontSize: 16 },
-  divider: {
-    height: 1,
-    backgroundColor: '#ddd',
-    marginTop: 10,
-    marginBottom: 10,
+  qtyNumber: { marginHorizontal: 10, fontSize: 16 },
+  divider: { height: 1, backgroundColor: '#ddd', marginTop: 10, marginBottom: 10 },
+  total: { fontSize: 20, fontWeight: 'bold', textAlign: 'right', marginVertical: 10, color: '#111' },
+  orderButton: { backgroundColor: '#00ffc3', padding: 16, borderRadius: 8, alignItems: 'center', marginTop: 10 },
+  orderText: { color: '#000', fontSize: 18, fontWeight: 'bold' },
+  floatingButton: {
+    position: 'absolute',
+    bottom: 25,
+    right: 25,
+    backgroundColor: '#FFD700',
+    padding: 18,
+    borderRadius: 50,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 6,
   },
-  total: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    textAlign: 'right',
-    marginVertical: 10,
-    color: '#111',
-  },
-  orderButton: {
-    backgroundColor: '#4CAF50',
-    padding: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  orderText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
+  floatingText: { fontSize: 22 },
 });

@@ -159,10 +159,15 @@ export default function MenuScreen() {
     setMenuItems(items);
   };
 
-  // Group menu by category
+  // ✅ Group menu by category and include category name in search
   const groupedMenu = Object.values(
     menuItems
-      .filter(item => item.name.toLowerCase().includes(search.toLowerCase()))
+      .filter((item) => {
+        const searchValue = search.toLowerCase();
+        const nameMatch = item.name.toLowerCase().includes(searchValue);
+        const categoryMatch = (item.category || "").toLowerCase().includes(searchValue);
+        return nameMatch || categoryMatch;
+      })
       .reduce((acc: Record<string, { title: string; data: MenuItem[] }>, item) => {
         const category = item.category || "Other";
         if (!acc[category]) acc[category] = { title: category, data: [] };
@@ -179,7 +184,8 @@ export default function MenuScreen() {
     <View style={styles.container}>
       <TextInput
         style={styles.search}
-        placeholder="Search menu..."
+        placeholder="Search menu or category..."
+        placeholderTextColor="#777"
         value={search}
         onChangeText={setSearch}
       />
@@ -208,7 +214,7 @@ export default function MenuScreen() {
       {/* Floating Cart Button */}
       <TouchableOpacity
         style={styles.cartButton}
-        onPress={() => router.push('../cart')}
+        onPress={() => router.push("../cart")}
       >
         <Text style={styles.cartText}>🛒 {cart.length}</Text>
       </TouchableOpacity>
@@ -263,19 +269,19 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 14,
   },
-button: {
-  backgroundColor: "#00ffc3",
-  padding: 10,
-  borderRadius: 8,
-  alignItems: "center",
-  marginTop: 10,
-  shadowColor: "#00ffc3",
-  shadowOffset: { width: 0, height: 0 },
-  shadowOpacity: 0.8,
-  shadowRadius: 10,
-  elevation: 10,
-},
-buttonText: { color: "#000", fontWeight: "bold" },
+  button: {
+    backgroundColor: "#00ffc3",
+    padding: 10,
+    borderRadius: 8,
+    alignItems: "center",
+    marginTop: 10,
+    shadowColor: "#00ffc3",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  buttonText: { color: "#000", fontWeight: "bold" },
   cartButton: {
     position: "absolute",
     bottom: 30,
